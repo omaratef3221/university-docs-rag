@@ -146,20 +146,23 @@ def render_sources(sources: list[dict], key_prefix: str) -> None:
 # --------------------------------------------------------------------------- #
 # Sidebar
 # --------------------------------------------------------------------------- #
+# The key is supplied by the deployment, never by the visitor. If it is missing
+# that is a server misconfiguration, so fail fast rather than degrade.
 api_key = config.get_api_key()
+if not api_key:
+    st.error("**Configuration error:** this app has no OpenAI API key configured.")
+    st.markdown(
+        "The key is provided by the server, not by visitors. Whoever deploys this app "
+        "should set it and restart:\n\n"
+        "- **Streamlit Community Cloud** — app menu → *Settings* → *Secrets*, then add "
+        "`OPENAI_API_KEY = \"sk-...\"`\n"
+        "- **Local development** — put `OPENAI_API_KEY=sk-...` in a `.env` file, or "
+        "export it in the shell"
+    )
+    st.stop()
 
 with st.sidebar:
     st.title("📘 Settings")
-
-    if not api_key:
-        st.error("No OpenAI API key found.")
-        st.markdown(
-            "Add it to `.streamlit/secrets.toml` as `OPENAI_API_KEY = \"sk-...\"`, "
-            "set the `OPENAI_API_KEY` environment variable, or paste it below."
-        )
-        typed = st.text_input("OpenAI API key", type="password")
-        if typed:
-            api_key = typed.strip()
 
     try:
         index = get_index()
@@ -242,10 +245,6 @@ if not prompt:
     prompt = st.session_state.pop("pending", None)
 
 if prompt:
-    if not api_key:
-        st.error("Add an OpenAI API key in the sidebar to ask questions.")
-        st.stop()
-
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)

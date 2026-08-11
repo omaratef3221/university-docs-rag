@@ -101,8 +101,18 @@ python scripts/ask.py "What are the rules for postponement of registration?"
 Because `index/` is committed, the app boots without re-embedding anything — no
 build step, no API cost at startup.
 
-> **Never commit your API key.** `.env` and `.streamlit/secrets.toml` are both in
-> `.gitignore`; the deployed app reads the key from Streamlit secrets.
+### The API key is server-side
+
+Visitors never see or enter a key — the app reads it from the deployment and
+refuses to start without one. It looks in `OPENAI_API_KEY` (environment) first,
+then Streamlit secrets, so the same code works locally and on Cloud.
+
+If the key is missing the app shows a configuration error instead of a chat box,
+which is the signal to whoever deployed it that secrets need setting.
+
+> **Never commit your API key.** `.env`, `.streamlit/secrets.toml`, and `.claude/`
+> are all in `.gitignore`. Because every visitor's questions bill your account,
+> keep the app private or put it behind access control if cost is a concern.
 
 ## Configuration
 

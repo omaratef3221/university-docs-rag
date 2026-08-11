@@ -1,0 +1,15 @@
+{
+  "embed_model": "text-embedding-3-large",
+  "dim": 3072,
+  "n_chunks": 343,
+  "chunk_tokens": 700,
+  "chunk_overlap": 120,
+  "documents": [
+    "Bachelor-of-Science-in-Chemical-and-Water-Desalination-Engineering-study-plan-22-23 1.pdf",
+    "Bachelor-of-Science-in-Chemical-and-Water-Desalination-Engineering-study-plan2023-2024.pdf",
+    "InternshipTrainingPoliciesProcedures2425.pdf",
+    "Policies_Procedures 1.pdf",
+    "Policies_and_Procedures_Manual.pdf"
+  ],
+  "built_at": "2026-08-11 17:12:34 UTC"
+}

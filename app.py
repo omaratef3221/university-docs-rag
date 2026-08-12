@@ -17,7 +17,7 @@ from rag.retrieve import retrieve
 from rag.store import load_index
 
 st.set_page_config(
-    page_title="University Docs Assistant",
+    page_title="CWDE Program Virtual Course Advisor",
     page_icon="📘",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -209,7 +209,7 @@ with st.sidebar:
 # --------------------------------------------------------------------------- #
 # Main pane
 # --------------------------------------------------------------------------- #
-st.title("University Documents Assistant")
+st.title("CWDE Program Virtual Course Advisor")
 st.caption(
     "Ask about policies, procedures, internships, and study plans. "
     "Every answer cites the document and page it came from."

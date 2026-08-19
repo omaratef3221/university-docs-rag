@@ -1,9 +1,15 @@
-# 📘 University Documents Assistant
+# 📘 CWDE Program Virtual Course Advisor
 
 A retrieval-augmented generation (RAG) chatbot over University of Sharjah policy,
-procedure, internship, and study-plan documents. Ask a question in plain English
-(or Arabic) and get an answer grounded in the source PDFs — with the exact
-document, section, and page it came from, and a rendered image of that page.
+procedure, internship, and study-plan documents, the Chemical & Water Desalination
+Engineering course syllabi (DOCX), and scraped pages from sharjah.ac.ae. Ask a
+question in plain English (or Arabic) and get an answer grounded in the sources —
+with the exact document, section, and page it came from (and a rendered image of
+that page for PDFs, or a link to the live page for web sources).
+
+The Virtual Academic Advisor is a complementary service and does not replace
+academic advisors. It currently serves BSc Chemical and Water Desalination
+Engineering students. Developed by Dr. Adewale Giwa and Eng. Omar Elgendy.
 
 Built with **OpenAI** embeddings + chat models, **FAISS**, **BM25**, and **Streamlit**.
 
@@ -25,6 +31,8 @@ break that approach in specific ways, so the pipeline handles each one:
 | Follow-up questions ("and for a master's?") lose their referent | Queries are **rewritten against conversation history** before searching |
 | Models pad thin retrieval with general knowledge | The prompt forbids outside knowledge, requires per-claim citations, and says so when the documents don't answer |
 | The same policy appears in several academic years | The model is instructed to surface the conflict and attribute each version |
+| Course syllabi are Word tables whose merged cells repeat text into every spanned column | A DOCX path walks paragraphs and tables in order, collapses the duplicates, and tracks syllabus labels ("Course Learning Outcomes:") as sections |
+| University web pages bury content under site chrome (menus, feedback widgets, banners) | The scraper strips the chrome and stores clean markdown with the source URL for citations |
 
 Every passage carries its document, page range, and section, so citations resolve
 to something a student can actually go and read.
@@ -51,8 +59,10 @@ to something a student can actually go and read.
 │   └── generate.py         # query rewriting + grounded answers
 ├── scripts/
 │   ├── build_index.py      # rebuild the index from Docs/
+│   ├── scrape_site.py      # scrape sharjah.ac.ae pages into Docs/web/
 │   └── ask.py              # ask a question from the terminal
-├── Docs/                   # source PDFs
+├── Docs/                   # source PDFs and DOCX course syllabi
+│   └── web/                # scraped university web pages (markdown + URL)
 ├── index/                  # prebuilt index (committed, so deploys start instantly)
 └── requirements.txt
 ```
@@ -128,10 +138,29 @@ Set these as environment variables or in Streamlit secrets to override the defau
 
 ## Adding your own documents
 
-Drop PDFs into `Docs/`, run `python scripts/build_index.py`, and commit the new
-`index/`. Nothing in the pipeline is specific to these five files — the cleaning
-heuristics are tuned for numbered policy manuals but degrade gracefully on
-ordinary prose PDFs.
+Drop PDFs or DOCX files into `Docs/`, run `python scripts/build_index.py`, and
+commit the new `index/`. The cleaning heuristics are tuned for numbered policy
+manuals and course syllabi but degrade gracefully on ordinary prose documents.
+
+## Scraping university web pages
+
+```bash
+python scripts/scrape_site.py                # priority crawl, capped at 350 pages
+python scripts/scrape_site.py --max-pages 500
+python scripts/scrape_site.py --only-seeds   # just the CWDE degree page
+```
+
+The scraper reads the sitemap at sharjah.ac.ae, always fetches the Chemical &
+Water Desalination Engineering degree page first, then crawls English pages in
+advising-priority order (Admissions → Degrees → Engineering → Academic Calendar →
+Student Life → Services → …), skipping Arabic mirrors, news, events, and staff
+profiles. Pages land in `Docs/web/` as markdown with their source URL; rebuild
+the index afterwards.
+
+**Why capped?** The full sitemap is ~14,600 URLs. Embedding all of it would make
+the committed FAISS index several hundred MB — beyond GitHub's 100 MB per-file
+limit and Streamlit Community Cloud's memory. Raise `--max-pages` gradually and
+watch the size of `index/faiss.index`.
 
 ## How a question flows through the system
 
@@ -150,8 +179,11 @@ question
 
 ## Notes and limits
 
-- Answers are only as current as the PDFs in `Docs/` (policy manual 2023–2024,
-  internship policy 2024–25, study plans 2022–23 and 2023–24).
+- Answers are only as current as the files in `Docs/` (policy manual 2023–2024,
+  internship policy 2024–25, study plans 2022–23 and 2023–24, the CWDE course
+  syllabi, and the scraped sharjah.ac.ae pages as of their `fetched` date).
+- The web crawl covers a prioritized subset of the university site, not all of
+  it — see "Scraping university web pages" above.
 - Scanned or image-only PDFs would need OCR; the current documents all contain
   extractable text.
 - Always confirm consequential decisions against the official document — the app

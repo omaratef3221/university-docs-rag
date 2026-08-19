@@ -72,7 +72,10 @@ def format_context(hits: list[Hit]) -> str:
     blocks = []
     for i, hit in enumerate(hits, start=1):
         c = hit.chunk
-        header = f"[{i}] {c.title} — {c.citation().split(', ', 1)[-1]}"
+        header = f"[{i}] {c.title}"
+        pages = c.pages()  # "" for pageless sources (syllabi, web pages)
+        if pages:
+            header += f" — {pages}"
         if c.section:
             header += f" — Section {c.section}"
         blocks.append(f"{header}\n{c.text}")

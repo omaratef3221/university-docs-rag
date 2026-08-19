@@ -53,9 +53,24 @@ EXAMPLE_QUESTIONS = [
     "What is the minimum GPA required to graduate?",
     "What are the rules for postponement of registration?",
     "How many training hours does the internship require?",
-    "How many credit hours are in the Water Desalination Engineering program?",
+    "What are the prerequisites for Chemical Thermodynamics I?",
     "How can a student appeal a final exam grade?",
 ]
+
+ABOUT_NOTE = """\
+The proposed University of Sharjah Virtual Academic Advisor is an online platform \
+designed to help students plan their academic pathways, track degree requirements, \
+and make informed course-registration decisions. This is a complementary service \
+and does not in any way replace the role of academic advisors. It will be useful \
+when academic advisors are on vacation or out of reach due to circumstances beyond \
+their (or the student user's) control. This platform only works for BSc Chemical \
+and Water Desalination Engineering Students for now. The goal of the developers is \
+to ensure that the application is useful for the entire university in the long run.
+
+**Developed by Dr. Adewale Giwa and Eng. Omar Elgendy.**
+"""
+
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 # --------------------------------------------------------------------------- #
@@ -88,7 +103,7 @@ def render_pdf_page(source: str, page: int, zoom: float = 2.0) -> bytes | None:
 
 
 @st.cache_data(show_spinner=False)
-def read_pdf_bytes(source: str) -> bytes | None:
+def read_doc_bytes(source: str) -> bytes | None:
     path = config.DOCS_DIR / source
     return path.read_bytes() if path.exists() else None
 
@@ -104,37 +119,49 @@ def render_sources(sources: list[dict], key_prefix: str) -> None:
         return
     st.markdown(f"**Sources** ({len(sources)})")
     for i, src in enumerate(sources, start=1):
-        pages = (
-            f"page {src['page_start']}"
-            if src["page_start"] == src["page_end"]
-            else f"pages {src['page_start']}–{src['page_end']}"
-        )
-        label = f"[{i}] {src['title']} — {pages}"
+        is_pdf = src["source"].lower().endswith(".pdf")
+        is_docx = src["source"].lower().endswith(".docx")
+        # DOCX syllabi and scraped web pages have no page numbers (page_start 0).
+        pages = ""
+        if src["page_start"]:
+            pages = (
+                f"page {src['page_start']}"
+                if src["page_start"] == src["page_end"]
+                else f"pages {src['page_start']}–{src['page_end']}"
+            )
+        label = f"[{i}] {src['title']}" + (f" — {pages}" if pages else "")
         with st.expander(label, expanded=False):
-            meta = f"`{src['source']}` · {pages} · matched by {src['retrievers']} search"
+            meta = f"`{src['source']}` · matched by {src['retrievers']} search"
+            if pages:
+                meta = f"`{src['source']}` · {pages} · matched by {src['retrievers']} search"
             if src.get("section"):
                 meta = f"**Section {src['section']}**  \n{meta}"
             st.markdown(meta)
+            if src.get("url"):
+                st.markdown(f"🔗 [Open this page on sharjah.ac.ae]({src['url']})")
             st.markdown("---")
             st.text(src["text"][:2000] + ("…" if len(src["text"]) > 2000 else ""))
 
             col1, col2 = st.columns([1, 1])
-            with col1:
-                show = st.toggle(
-                    "Show document page",
-                    key=f"{key_prefix}-page-{i}",
-                    help="Render the original PDF page this passage came from.",
-                )
-            with col2:
-                data = read_pdf_bytes(src["source"])
-                if data:
-                    st.download_button(
-                        "Download PDF",
-                        data=data,
-                        file_name=src["source"],
-                        mime="application/pdf",
-                        key=f"{key_prefix}-dl-{i}",
+            show = False
+            if is_pdf:
+                with col1:
+                    show = st.toggle(
+                        "Show document page",
+                        key=f"{key_prefix}-page-{i}",
+                        help="Render the original PDF page this passage came from.",
                     )
+            if is_pdf or is_docx:
+                data = read_doc_bytes(src["source"])
+                if data:
+                    with col2:
+                        st.download_button(
+                            "Download PDF" if is_pdf else "Download syllabus (DOCX)",
+                            data=data,
+                            file_name=src["source"].rsplit("/", 1)[-1],
+                            mime="application/pdf" if is_pdf else DOCX_MIME,
+                            key=f"{key_prefix}-dl-{i}",
+                        )
             if show:
                 png = render_pdf_page(src["source"], src["page_start"])
                 if png:
@@ -210,85 +237,118 @@ with st.sidebar:
 # Main pane
 # --------------------------------------------------------------------------- #
 st.title("CWDE Program Virtual Course Advisor")
+st.info(ABOUT_NOTE)
 st.caption(
-    "Ask about policies, procedures, internships, and study plans. "
-    "Every answer cites the document and page it came from."
+    "Ask about policies, procedures, internships, study plans, course syllabi, "
+    "and university web pages. Every answer cites the source it came from."
 )
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-if not st.session_state.messages:
-    st.markdown("**Try one of these:**")
-    cols = st.columns(len(EXAMPLE_QUESTIONS[:3]))
-    for col, q in zip(cols, EXAMPLE_QUESTIONS[:3]):
-        if col.button(q, use_container_width=True):
-            st.session_state.pending = q
-            st.rerun()
-    with st.expander("More examples"):
-        for q in EXAMPLE_QUESTIONS[3:]:
-            if st.button(q, key=f"ex-{q}", use_container_width=True):
+tab_chat, tab_docs = st.tabs(["💬 Chat", "📚 Supported documents & pages"])
+
+with tab_docs:
+    st.markdown(
+        "Everything the advisor can answer from. Titles only — open the source "
+        "itself from the citations under an answer."
+    )
+    docs: dict[str, dict] = {}
+    for c in index.chunks:
+        docs.setdefault(c.source, {"title": c.title, "url": getattr(c, "url", "")})
+    pdfs = {s: d for s, d in docs.items() if s.lower().endswith(".pdf")}
+    syllabi = {s: d for s, d in docs.items() if s.lower().endswith(".docx")}
+    web = {s: d for s, d in docs.items() if d["url"] or s.startswith("web/")}
+
+    st.subheader(f"Policies, procedures & study plans ({len(pdfs)})")
+    for d in sorted(pdfs.values(), key=lambda d: d["title"].lower()):
+        st.markdown(f"- {d['title']}")
+
+    st.subheader(f"Course syllabi ({len(syllabi)})")
+    for d in sorted(syllabi.values(), key=lambda d: d["title"].lower()):
+        st.markdown(f"- {d['title']}")
+
+    st.subheader(f"University web pages ({len(web)})")
+    for d in sorted(web.values(), key=lambda d: d["title"].lower()):
+        if d["url"]:
+            st.markdown(f"- [{d['title']}]({d['url']})")
+        else:
+            st.markdown(f"- {d['title']}")
+
+with tab_chat:
+    if not st.session_state.messages:
+        st.markdown("**Try one of these:**")
+        cols = st.columns(len(EXAMPLE_QUESTIONS[:3]))
+        for col, q in zip(cols, EXAMPLE_QUESTIONS[:3]):
+            if col.button(q, use_container_width=True):
                 st.session_state.pending = q
                 st.rerun()
+        with st.expander("More examples"):
+            for q in EXAMPLE_QUESTIONS[3:]:
+                if st.button(q, key=f"ex-{q}", use_container_width=True):
+                    st.session_state.pending = q
+                    st.rerun()
 
-for i, msg in enumerate(st.session_state.messages):
-    with st.chat_message(msg["role"]):
-        if msg["role"] == "assistant":
-            st.markdown(highlight_citations(msg["content"]), unsafe_allow_html=True)
-            render_sources(msg.get("sources", []), key_prefix=f"m{i}")
-        else:
-            st.markdown(msg["content"])
+    for i, msg in enumerate(st.session_state.messages):
+        with st.chat_message(msg["role"]):
+            if msg["role"] == "assistant":
+                st.markdown(highlight_citations(msg["content"]), unsafe_allow_html=True)
+                render_sources(msg.get("sources", []), key_prefix=f"m{i}")
+            else:
+                st.markdown(msg["content"])
 
-prompt = st.chat_input("Ask about the university documents…")
-if not prompt:
-    # An example-question button was clicked on the previous run.
-    prompt = st.session_state.pop("pending", None)
+    prompt = st.chat_input("Ask about the university documents…")
+    if not prompt:
+        # An example-question button was clicked on the previous run.
+        prompt = st.session_state.pop("pending", None)
 
-if prompt:
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    if prompt:
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-    client = get_client(api_key)
-    history = [
-        {"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:-1]
-    ]
-
-    with st.chat_message("assistant"):
-        try:
-            with st.spinner("Searching the documents…"):
-                search_query = rewrite_query(client, prompt, history)
-                hits = retrieve(
-                    client,
-                    index,
-                    search_query,
-                    top_k=top_k,
-                    rerank=use_rerank,
-                    sources=selected or None,
-                )
-            if search_query.strip().lower() != prompt.strip().lower():
-                st.caption(f"Searched for: _{search_query}_")
-
-            text = st.write_stream(answer_stream(client, prompt, hits, history))
-        except Exception as exc:
-            text = f"Something went wrong while answering: `{exc}`"
-            st.error(text)
-            hits = []
-
-        sources = [
-            {
-                "title": h.chunk.title,
-                "source": h.chunk.source,
-                "page_start": h.chunk.page_start,
-                "page_end": h.chunk.page_end,
-                "section": h.chunk.section,
-                "text": h.chunk.text,
-                "retrievers": h.retrievers,
-            }
-            for h in hits
+        client = get_client(api_key)
+        history = [
+            {"role": m["role"], "content": m["content"]}
+            for m in st.session_state.messages[:-1]
         ]
-        render_sources(sources, key_prefix=f"m{len(st.session_state.messages)}")
 
-    st.session_state.messages.append(
-        {"role": "assistant", "content": text, "sources": sources}
-    )
+        with st.chat_message("assistant"):
+            try:
+                with st.spinner("Searching the documents…"):
+                    search_query = rewrite_query(client, prompt, history)
+                    hits = retrieve(
+                        client,
+                        index,
+                        search_query,
+                        top_k=top_k,
+                        rerank=use_rerank,
+                        sources=selected or None,
+                    )
+                if search_query.strip().lower() != prompt.strip().lower():
+                    st.caption(f"Searched for: _{search_query}_")
+
+                text = st.write_stream(answer_stream(client, prompt, hits, history))
+            except Exception as exc:
+                text = f"Something went wrong while answering: `{exc}`"
+                st.error(text)
+                hits = []
+
+            sources = [
+                {
+                    "title": h.chunk.title,
+                    "source": h.chunk.source,
+                    "page_start": h.chunk.page_start,
+                    "page_end": h.chunk.page_end,
+                    "section": h.chunk.section,
+                    "text": h.chunk.text,
+                    "retrievers": h.retrievers,
+                    "url": h.chunk.url,
+                }
+                for h in hits
+            ]
+            render_sources(sources, key_prefix=f"m{len(st.session_state.messages)}")
+
+        st.session_state.messages.append(
+            {"role": "assistant", "content": text, "sources": sources}
+        )

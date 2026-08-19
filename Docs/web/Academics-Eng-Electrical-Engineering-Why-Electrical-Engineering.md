@@ -1,0 +1,11 @@
+---
+url: https://www.sharjah.ac.ae/Academics/Eng/Electrical-Engineering/Why-Electrical-Engineering
+title: Academics — Why Electrical Engineering?
+fetched: 2026-08-19
+---
+
+## Why Electrical Engineering?
+
+The University of Sharjah's Department of Electrical Engineering provides quality undergraduate and graduate engineering education. The Department of Electrical Engineering offers four different programs: Bachelor of Electrical and Electronics Engineering, Master of Electrical and Electronics Engineering, Master of Biomedical Engineering, and Ph.D. of Electrical and Computer Engineering. The undergraduate program is accredited by the UAE Ministry of Higher Education and Scientific Research (MOHESR) and by the American board of Engineering and technology (ABET). The curricula of different programs are well designed to build the required knowledge, soft and critical thinking skills for graduates to efficiently cope with market and employability requirements . The given curricula cover the following specialties: electrical and electronic circuits (digital and analog), processes control and robotics, wired and wireless communication systems, signal processing, artificial intelligence applications in electric systems, electrical power and energy systems, smart grids, renewable energies, and biomedical applications. The undergraduate and graduate programs are provided with a large number of fundamental and advanced courses supported by laboratory components.
+
+There is an ambitious plan for developing more undergraduate program (Biomedical Engineering) and adding more concentrations to existing programs (AI applications in EE). The Department of Electrical Engineering encompasses an outstanding group of faculty members, Lab. Engineers, and administrative staff who are diligently working to keep the reputation of the department. In 2024 of QS ranking, the Department of Electrical Engineering is ranked # 2 compared to similar departments within UAE and # 206 compared to similar departments worldwide. The Department of Electrical Engineering gives more attention to the social and entertainment life of students. The department has IEEE, WIE, and Robotics student clubs, which are responsible for setting different social and educational events at the Department/College/University/nationwide levels.

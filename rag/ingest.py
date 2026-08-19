@@ -1,4 +1,4 @@
-"""PDF -> cleaned, page-tracked, section-aware text chunks.
+"""Documents (PDF and DOCX) -> cleaned, page-tracked, section-aware text chunks.
 
 The source PDFs are university policy manuals and study plans. They share a few
 quirks that plain text extraction handles badly:
@@ -14,6 +14,14 @@ quirks that plain text extraction handles badly:
 This module therefore reads each page as positioned blocks, renders detected
 tables row-wise, strips the boilerplate, and emits chunks that carry the
 document, page range, and section path needed to cite them.
+
+The course syllabi are DOCX files rather than PDFs. They are mostly Word
+tables (course code, credit hours, prerequisites, weekly topics, assessment),
+with merged cells that repeat their text into every spanned column, and they
+have no printable page numbers. The DOCX path walks body paragraphs and tables
+in document order, renders tables row-wise with the duplicates collapsed, and
+emits chunks with ``page_start == page_end == 0`` — the citation and the UI
+omit page numbers for those.
 """
 
 from __future__ import annotations
@@ -23,8 +31,12 @@ import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+import docx
+import docx.table
+import docx.text.paragraph
 import pymupdf
 import tiktoken
+from docx.oxml.ns import qn
 
 from . import config
 
@@ -49,22 +61,27 @@ class Chunk:
     """One retrievable passage plus everything needed to cite it."""
 
     id: int
-    source: str  # PDF file name
+    source: str  # file name in Docs/
     title: str  # human-readable document title
-    page_start: int  # 1-based, as printed in a PDF viewer
+    page_start: int  # 1-based, as printed in a PDF viewer; 0 when pageless (DOCX, web)
     page_end: int
     section: str  # nearest enclosing numbered heading, "" if none
     text: str
     tokens: int = 0
+    url: str = ""  # original web address, for scraped pages only
     embed_text: str = field(default="", repr=False)
 
+    def pages(self) -> str:
+        """Human-readable page range, or "" for formats without pages (DOCX)."""
+        if not self.page_start:
+            return ""
+        if self.page_start == self.page_end:
+            return f"p. {self.page_start}"
+        return f"pp. {self.page_start}-{self.page_end}"
+
     def citation(self) -> str:
-        pages = (
-            f"p. {self.page_start}"
-            if self.page_start == self.page_end
-            else f"pp. {self.page_start}-{self.page_end}"
-        )
-        return f"{self.title}, {pages}"
+        pages = self.pages()
+        return f"{self.title}, {pages}" if pages else self.title
 
 
 def pretty_title(filename: str) -> str:
@@ -256,12 +273,144 @@ def _split_long(para: _Para) -> list[_Para]:
     return pieces
 
 
-def chunk_document(pdf_path: Path, start_id: int) -> list[Chunk]:
-    """Chunk one PDF into overlapping, section-aware passages."""
-    source = pdf_path.name
-    title = pretty_title(source)
+# --------------------------------------------------------------------------- #
+# DOCX (course syllabi)
+# --------------------------------------------------------------------------- #
+def _docx_blocks(document):
+    """Yield body paragraphs and tables in document order."""
+    for child in document.element.body.iterchildren():
+        if child.tag == qn("w:p"):
+            yield docx.text.paragraph.Paragraph(child, document)
+        elif child.tag == qn("w:tbl"):
+            yield docx.table.Table(child, document)
+
+
+def _docx_table_rows(table) -> list[str]:
+    """Render a Word table one line per row, pipe-separated.
+
+    Merged cells repeat their text into every spanned column, so consecutive
+    duplicate cells are collapsed before joining.
+    """
+    rows: list[str] = []
+    for row in table.rows:
+        cells = [" ".join(c.text.split()) for c in row.cells]
+        merged: list[str] = []
+        for cell in cells:
+            if cell and (not merged or cell != merged[-1]):
+                merged.append(cell)
+        if merged:
+            rows.append(" | ".join(merged))
+    return rows
+
+
+def _docx_heading(paragraph, text: str) -> str | None:
+    """Return `text` if it acts as a section heading in a syllabus, else None.
+
+    The syllabi rarely use real Heading styles; their section markers are short
+    label paragraphs ending with a colon ("Course Learning Outcomes:").
+    """
+    style = (paragraph.style.name or "") if paragraph.style else ""
+    if style.startswith("Heading"):
+        return text.rstrip(":")
+    if len(text) <= 70 and text.endswith(":") and not text[:-1].endswith(_SENTENCE_END):
+        return text.rstrip(":")
+    return None
+
+
+def _docx_paragraphs(path: Path) -> list[_Para]:
+    """Flatten a DOCX into paragraphs; there are no pages, so page is 0."""
+    document = docx.Document(str(path))
     paras: list[_Para] = []
-    for para in _paragraphs(pdf_path):
+    section = ""
+    for block in _docx_blocks(document):
+        if isinstance(block, docx.table.Table):
+            # One paragraph per row, mirroring the PDF table handling.
+            for row in _docx_table_rows(block):
+                paras.append(_Para(row, 0, section))
+            continue
+        text = " ".join(block.text.split())
+        if not text:
+            continue
+        heading = _docx_heading(block, text)
+        if heading is not None:
+            section = heading
+        paras.append(_Para(text, 0, section))
+    return paras
+
+
+# --------------------------------------------------------------------------- #
+# Scraped web pages (Docs/web/*.md, written by scripts/scrape_site.py)
+# --------------------------------------------------------------------------- #
+_MD_HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
+
+
+def _md_document(path: Path) -> tuple[list[_Para], str, str]:
+    """Parse a scraped-page markdown file -> (paragraphs, title, url).
+
+    The scraper writes a minimal front-matter header (url/title/fetched)
+    followed by the extracted page text, with HTML headings as `#` lines and
+    table rows as pipe-separated lines.
+    """
+    lines = path.read_text(encoding="utf-8").splitlines()
+    title, url = "", ""
+    body_start = 0
+    if lines and lines[0].strip() == "---":
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                body_start = i + 1
+                break
+            key, _, value = lines[i].partition(":")
+            if key.strip() == "url":
+                url = value.strip()
+            elif key.strip() == "title":
+                title = value.strip()
+
+    paras: list[_Para] = []
+    section = ""
+    buf: list[str] = []
+
+    def flush() -> None:
+        if buf:
+            text = " ".join(buf).strip()
+            if text:
+                paras.append(_Para(text, 0, section))
+            buf.clear()
+
+    for raw in lines[body_start:]:
+        ln = raw.strip()
+        if not ln:
+            flush()
+            continue
+        m = _MD_HEADING.match(ln)
+        if m:
+            flush()
+            section = m.group(2).strip()
+            paras.append(_Para(section, 0, section))
+            continue
+        if "|" in ln:
+            flush()
+            paras.append(_Para(ln.strip("| "), 0, section))
+            continue
+        buf.append(ln)
+    flush()
+    return paras, title, url
+
+
+def chunk_document(path: Path, start_id: int, source: str | None = None) -> list[Chunk]:
+    """Chunk one document (PDF, DOCX, or scraped page) into overlapping passages."""
+    source = source or path.name
+    title = pretty_title(path.name)
+    url = ""
+    suffix = path.suffix.lower()
+    if suffix == ".md":
+        raw_paras, md_title, url = _md_document(path)
+        title = md_title or title
+    elif suffix == ".docx":
+        raw_paras = _docx_paragraphs(path)
+    else:
+        raw_paras = _paragraphs(path)
+    paras: list[_Para] = []
+    for para in raw_paras:
         paras.extend(_split_long(para))
 
     chunks: list[Chunk] = []
@@ -286,6 +435,7 @@ def chunk_document(pdf_path: Path, start_id: int) -> list[Chunk]:
             section=section,
             text=text,
             tokens=n_tokens(text),
+            url=url,
         )
         # Embedding the document/section header alongside the body measurably
         # improves retrieval on questions phrased in the document's own terms.
@@ -318,15 +468,26 @@ def chunk_document(pdf_path: Path, start_id: int) -> list[Chunk]:
 
 
 def build_chunks(docs_dir: Path | None = None) -> list[Chunk]:
-    """Chunk every PDF in the documents directory."""
+    """Chunk every document in the documents directory.
+
+    Picks up PDFs and DOCX syllabi at the top level, plus scraped web pages
+    under `web/`. Word lock files ("~$...") are skipped.
+    """
     docs_dir = docs_dir or config.DOCS_DIR
-    pdfs = sorted(docs_dir.glob("*.pdf"))
-    if not pdfs:
-        raise FileNotFoundError(f"No PDFs found in {docs_dir}")
+    files = [
+        p
+        for pattern in ("*.pdf", "*.docx", "web/*.md")
+        for p in docs_dir.glob(pattern)
+        if not p.name.startswith("~$")
+    ]
+    files.sort(key=lambda p: p.relative_to(docs_dir).as_posix())
+    if not files:
+        raise FileNotFoundError(f"No documents found in {docs_dir}")
     chunks: list[Chunk] = []
-    for pdf in pdfs:
-        doc_chunks = chunk_document(pdf, start_id=len(chunks))
-        print(f"  {pdf.name}: {len(doc_chunks)} chunks")
+    for path in files:
+        source = path.relative_to(docs_dir).as_posix()
+        doc_chunks = chunk_document(path, start_id=len(chunks), source=source)
+        print(f"  {source}: {len(doc_chunks)} chunks")
         chunks.extend(doc_chunks)
     return chunks
 

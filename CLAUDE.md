@@ -8,8 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 source /venv/main/bin/activate       # this instance; deps are already installed
 
 streamlit run app.py                 # the chat UI
-python scripts/build_index.py        # re-chunk + re-embed Docs/ into index/  (~40s, a few cents)
+python scripts/build_index.py        # re-chunk + re-embed Docs/ into index/  (~2 min, a few cents)
 python scripts/ask.py "question"     # answer one question in the terminal — fastest smoke test
+python scripts/scrape_site.py        # refresh Docs/web/ from sharjah.ac.ae (then rebuild)
 ```
 
 PyMuPDF writes `Consider using the pymupdf_layout package` to stderr on most
@@ -45,13 +46,39 @@ original PDF page as an image.
 `rag/ingest.py` → `rag/store.py` → `rag/retrieve.py` → `rag/generate.py`, with
 `app.py` as the only UI layer and `rag/config.py` holding all tunables.
 
+### Three source types, one chunk shape
+
+`build_chunks` ingests `Docs/*.pdf` (policy manuals, study plans — PyMuPDF),
+`Docs/*.docx` (course syllabi — python-docx), and `Docs/web/*.md` (pages scraped
+from sharjah.ac.ae by `scripts/scrape_site.py`). DOCX and web chunks have
+`page_start == page_end == 0`; `Chunk.pages()`/`citation()` and the UI omit page
+numbers for them, and web chunks carry the source `url` (shown as a link — there
+is no page preview or download for web sources). `Chunk.source` is the path
+*relative to `Docs/`* (`web/<slug>.md` for scraped pages), so keep using it with
+`config.DOCS_DIR / source`.
+
+The syllabi are Word tables whose merged cells repeat text into every spanned
+column — `_docx_table_rows` collapses consecutive duplicates; don't "simplify"
+that away. Syllabus sections come from short colon-terminated label paragraphs
+("Course Learning Outcomes:"), not numbered headings.
+
+### The web crawl is deliberately capped
+
+The sitemap has ~14,600 URLs; embedding all of it would make the committed FAISS
+index several hundred MB (GitHub refuses files > 100 MB, Streamlit Cloud runs out
+of memory). `scrape_site.py` crawls a priority-ordered English subset (default
+cap 350 pages, seeds + Admissions/Degree/Eng/Student-Life first, news/events/staff
+profiles excluded). Raise `--max-pages` only while watching `index/faiss.index`
+size.
+
 ### `index/` is a committed build artifact
 
 The FAISS index and chunk store are checked in so Streamlit Cloud deploys boot
 without re-embedding. **Anything that changes chunk content or the embedding
-space invalidates them**: editing `Docs/`, the chunking constants in
-`rag/config.py`, the heuristics in `rag/ingest.py`, or `EMBED_MODEL`. After such
-a change, re-run `scripts/build_index.py` and commit the regenerated `index/`.
+space invalidates them**: editing `Docs/` (including re-scraping `Docs/web/`),
+the chunking constants in `rag/config.py`, the heuristics in `rag/ingest.py`, or
+`EMBED_MODEL`. After such a change, re-run `scripts/build_index.py` and commit
+the regenerated `index/`.
 
 `load_index()` catches a vector/chunk count mismatch, but **cannot detect a
 changed embedding model** — that failure is silent and shows up only as bad

@@ -1,0 +1,56 @@
+CWDE Program Virtual Course Advisor — version history
+=====================================================
+
+Version 2.0.0 — 2026-08-19
+--------------------------
+
+New document types
+- Added DOCX ingestion: the 37 course-syllabus .docx files in Docs/ are now
+  chunked and indexed (previously only PDFs were read). Word tables are
+  rendered row-wise with merged-cell duplicates collapsed, and syllabus
+  labels ("Course Learning Outcomes:", "Attendance policy:") are tracked as
+  sections for citations.
+- Added web-page ingestion: scraped pages stored as Docs/web/*.md (with a
+  url/title/fetched front-matter header) are chunked and indexed, and their
+  citations link back to the original page on sharjah.ac.ae.
+
+Web scraping (scripts/scrape_site.py)
+- New scraper that reads the university sitemap and saves pages into
+  Docs/web/. The Chemical and Water Desalination Engineering degree page is
+  always fetched first, then English pages in advising-priority order
+  (Admissions, Degrees, Engineering, Academic Calendar, Student Life,
+  Services, Discover UoS, Academics), capped at 350 pages by default
+  (--max-pages to raise). Arabic mirrors, news, events, conferences and
+  staff-profile pages are excluded. Note: indexing the entire ~14,600-page
+  sitemap is not possible with the committed-index architecture (GitHub's
+  100 MB file limit and Streamlit Cloud memory); the cap is the deliberate
+  trade-off.
+
+App (Streamlit UI)
+- Added the platform note under the title: the Virtual Academic Advisor
+  description, its complementary (non-replacement) role with respect to
+  academic advisors, the current BSc Chemical and Water Desalination
+  Engineering scope, and the developer credits (Dr. Adewale Giwa and
+  Eng. Omar Elgendy).
+- Added a "Supported documents & pages" tab listing the titles of every
+  indexed policy document, course syllabus, and university web page
+  (titles only; web titles link to the live page).
+- Source cards now adapt to the source type: PDF page preview and PDF
+  download for PDFs, DOCX download for syllabi, a link to the original
+  page for web sources; page numbers are shown only where they exist.
+- New example question about course prerequisites.
+
+Index
+- Rebuilt to cover the 5 PDFs, 37 syllabi, and the scraped web pages.
+  PDF chunking is byte-identical to version 1 (verified), so policy
+  retrieval is unchanged.
+
+Dependencies
+- Added python-docx, requests, beautifulsoup4, lxml.
+
+Version 1.0.0 — 2026-08-11
+--------------------------
+- Initial release: hybrid RAG (FAISS + BM25 + reciprocal-rank fusion +
+  LLM reranking) over the university policy manuals, internship policy and
+  CWDE study plans, with a Streamlit chat UI, per-claim citations, PDF page
+  previews, and a committed prebuilt index for instant deploys.
